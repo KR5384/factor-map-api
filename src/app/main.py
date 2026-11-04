@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import items
+from app.routers import admin, factor_analyses, surveys
 
 app = FastAPI(title="factor-map-api")
 
@@ -13,7 +13,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(items.router)
+# 研究データ保存 API (v1)
+app.include_router(surveys.router)
+app.include_router(factor_analyses.router)
+
+# 管理者 API (v1)
+app.include_router(admin.router)
 
 
 @app.get("/")

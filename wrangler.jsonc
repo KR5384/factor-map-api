@@ -2,5 +2,23 @@
   "name": "factor-map-api",
   "main": "src/worker.py",
   "compatibility_date": "2026-10-19",
-  "compatibility_flags": ["python_workers"]
+  "compatibility_flags": ["python_workers"],
+  // D1 データベースバインディング。Worker からは request.scope["env"].DB で参照する。
+  // database_id は `wrangler d1 create <name>` 実行後に発行される値。
+  // 研究データは factor-map-db に集約する。
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "factor-map-db",
+      "database_id": "edb14dc4-b47e-405c-8ec3-225f288a80a3",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // 管理者機能 (F-19) 用の資格情報プレースホルダ。
+  // 本番では `wrangler secret put` で上書きし、ここにはコミットしない。
+  "vars": {
+    "ADMIN_USER": "admin",
+    "ADMIN_PASSWORD": "change-me-in-secrets",
+    "ADMIN_TOKEN": "change-me-in-secrets"
+  }
 }
