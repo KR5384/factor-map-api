@@ -9,6 +9,11 @@ dependencies = [
 [dependency-groups]
 dev = [
     "fastapi[standard]",
+    "pytest>=9.2.0",
     "workers-py",
     "workers-runtime-sdk",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -2,5 +2,15 @@
   "name": "factor-map-api",
   "main": "src/worker.py",
   "compatibility_date": "2026-10-19",
-  "compatibility_flags": ["python_workers"]
+  "compatibility_flags": ["python_workers"],
+  // D1: used from code as env.DB (src/app/db.py).
+  // Replace database_id with the value shown by `npx wrangler d1 create factor-map-db`.
+  // Keep this file ASCII only: pywrangler reads it with the Windows default encoding.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "factor-map-db",
+      "database_id": "edb14dc4-b47e-405c-8ec3-225f288a80a3"
+    }
+  ]
 }
