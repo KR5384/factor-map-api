@@ -3,6 +3,10 @@
   "main": "src/worker.py",
   "compatibility_date": "2026-10-19",
   "compatibility_flags": ["python_workers"],
+  // FORCE_TEST_MODE / ENABLE_GROUP_B are set in the dashboard (Settings > Variables), not here.
+  // keep_vars stops `deploy` from deleting them. If FORCE_TEST_MODE is not set, it is treated
+  // as "true" (all data is test data). Set it to "false" when the real survey starts.
+  "keep_vars": true,
   // D1: used from code as env.DB (src/app/db.py).
   // Replace database_id with the value shown by `npx wrangler d1 create factor-map-db`.
   // Keep this file ASCII only: pywrangler reads it with the Windows default encoding.

@@ -72,7 +72,7 @@ def test_full_flow_through_d1_adapter():
         client = TestClient(app)
         did = client.post("/api/v1/surveys/pre", json=pre_body()).json()["diagnosis_id"]
         fa = client.post("/api/v1/factor-analyses", json={"diagnosis_id": did, "answers": answers(q05=5, q06=5)})
-        assert fa.status_code == 200 and fa.json()["main_category_id"] == 3
+        assert fa.status_code == 200 and fa.json()["main_category_id"] == 5
         assert client.post("/api/v1/surveys/post", json=post_body(did)).status_code == 200
         # 再送信（同じ内容）・違う内容・存在しないID も D1 経由で正しく判定できる
         assert client.post("/api/v1/surveys/post", json=post_body(did)).status_code == 200
@@ -82,7 +82,7 @@ def test_full_flow_through_d1_adapter():
         app.dependency_overrides.clear()
 
     row = fake.sqlite.conn.execute("SELECT status, shown_1, post_explain FROM diagnoses").fetchone()
-    assert tuple(row) == ("completed", 3, 4)
+    assert tuple(row) == ("completed", 5, 4)
     kinds = {k for k, _ in fake.calls}
     assert kinds == {"first", "run"}
 

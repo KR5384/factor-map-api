@@ -80,7 +80,7 @@ uv run pywrangler deploy
 | Workers（`pywrangler dev` / デプロイ後） | **D1**（`wrangler.jsonc` の `"binding": "DB"`） |
 | `fastapi dev` | SQLite（`local.db`） |
 | `pytest` | SQLite（メモリ上。テストごとに空） |
-- 採点の重み（`src/app/scoring.py` の `WEIGHTS`）は仮。診断チームの重みの表が届いたら差し替える。
+- 採点の重み（`src/app/scoring.py`）は factor-map-web の `public/questions.json`（version 2）と同じ値。**重みを直すときは両方を直し、`SCORING_VERSION` を上げる**。
 
 > items は今はメモリ上に保持しています。Workers ではリクエスト間でデータが残らないので、今後 D1 に移行予定です。
 
@@ -169,20 +169,30 @@ npx wrangler d1 execute factor-map-db --local --command "SELECT diagnosis_id, st
 - データを消す: `npx wrangler d1 execute factor-map-db --local --command "DELETE FROM diagnoses"`
 - ローカルの D1 のデータは `.wrangler/state/` に保存される（Git には入らない）。
 
-### 環境変数（fastapi dev のとき）
+### 環境変数
 
 | 名前 | 既定値 | 内容 |
 |---|---|---|
-| `FACTOR_MAP_SQLITE` | `local.db` | 使う SQLite ファイルのパス。**変わるのは SQLite ファイルの場所だけ**。D1 を使うかどうかは環境変数ではなく、Workers で動いているか（D1 のバインディングがあるか）で決まる |
-| `ENABLE_GROUP_B` | `false` | `true` にすると事前アンケートで A／B をランダムに振る（Workers での設定方法は未対応。今は Workers では常に A） |
+| `FORCE_TEST_MODE` | `true` | `true` の間は**全件 `is_test=1`**（テストデータ）で保存する。**検証を始めるときに `false` にする**。`false` でも、ヘッダー `X-Test-Mode: 1`（画面 URL の `?test=1`）付きの回答はテストデータになる |
+| `ENABLE_GROUP_B` | `false` | `true` にすると事前アンケートで A／B をランダムに振る |
+| `FACTOR_MAP_SQLITE` | `local.db` | ローカルで使う SQLite ファイルのパス。D1 を使うかどうかは環境変数ではなく、Workers で動いているか（D1 のバインディングがあるか）で決まる |
+
+**本番（Workers）では**、`FORCE_TEST_MODE`・`ENABLE_GROUP_B` を Cloudflare のダッシュボードで設定する（factor-map-api → Settings → Variables and Secrets、種類は Text）。
+
+- 設定していなければ既定値（`FORCE_TEST_MODE=true`）になる。**検証を始める日に `FORCE_TEST_MODE` を `false` で追加する**。
+- `wrangler.jsonc` の `keep_vars: true` で、デプロイしてもダッシュボードの値は消えない。
+- 切り替わったかは、`?test=1` を付けずに画面を開いて事前アンケートを送り、画面上部に「テストモード」の帯が出ないことで確かめる。
+
+ローカル（`fastapi dev`）では OS の環境変数で設定する:
 
 ```powershell
-$env:FACTOR_MAP_SQLITE = "test2.db"   # 別のファイルで試す
+$env:FORCE_TEST_MODE = "false"        # 本番と同じ扱い（ヘッダーが無ければ is_test=0）
 $env:ENABLE_GROUP_B = "true"          # B群を混ぜる
+$env:FACTOR_MAP_SQLITE = "test2.db"   # 別のファイルで試す
 uv run fastapi dev src/app/main.py
 ```
 
-- 環境変数はそのウィンドウだけで有効。元に戻すときは `Remove-Item Env:FACTOR_MAP_SQLITE` などで消す。
+- 環境変数はそのウィンドウだけで有効。元に戻すときは `Remove-Item Env:FORCE_TEST_MODE` などで消す。
 
 ### データを消してやり直す
 

@@ -1,16 +1,16 @@
 """API-01 事前アンケート／API-02 診断／API-03 事後アンケート（API仕様書.xlsx）。"""
 
-import os
 import random
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 
 from app.db import Database, get_db
 from app.errors import ApiError
 from app.schemas import CAUSE_NONE, CAUSE_UNKNOWN, FactorAnalysisIn, PostSurveyIn, PreSurveyIn
 from app.scoring import QUESTION_KEYS, result_from_row, score
+from app.settings import is_enabled
 
 router = APIRouter(prefix="/api/v1", tags=["diagnoses"])
 
@@ -21,11 +21,16 @@ def now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def assign_group() -> str:
+def assign_group(request: Request) -> str:
     """ENABLE_GROUP_B が true なら A／B をランダムに振る。"""
-    if os.environ.get("ENABLE_GROUP_B", "false").lower() == "true":
+    if is_enabled(request, "ENABLE_GROUP_B"):
         return random.choice(["A", "B"])
     return "A"
+
+
+def decide_is_test(request: Request, x_test_mode: str | None) -> int:
+    """FORCE_TEST_MODE が true なら全件テスト。false でもヘッダー X-Test-Mode: 1 ならテスト。"""
+    return 1 if is_enabled(request, "FORCE_TEST_MODE") or x_test_mode == "1" else 0
 
 
 async def find_row(db: Database, diagnosis_id: str) -> dict:
@@ -51,17 +56,19 @@ def already_submitted() -> ApiError:
 @router.post("/surveys/pre", status_code=201)
 async def post_pre_survey(
     body: PreSurveyIn,
+    request: Request,
     x_test_mode: str | None = Header(default=None),
     db: Database = Depends(get_db),
 ):
     diagnosis_id = str(uuid.uuid4())
-    group = assign_group()
+    group = assign_group(request)
+    is_test = decide_is_test(request, x_test_mode)
     causes = set(body.pre_causes)
     cols = {
         "diagnosis_id": diagnosis_id,
         "status": "pre_done",
         "grp": group,
-        "is_test": 1 if x_test_mode == "1" else 0,
+        "is_test": is_test,
         "consent_version": body.consent_version,
         "client_version": body.client_version,
         "created_at": now_utc(),
@@ -77,7 +84,8 @@ async def post_pre_survey(
         f"INSERT INTO diagnoses ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
         list(cols.values()),
     )
-    return {"diagnosis_id": diagnosis_id, "group": group, "status": "pre_done"}
+    # is_test を返すのは、フロントが「テストモード」の表示を出して本番切り替え漏れに気づけるようにするため
+    return {"diagnosis_id": diagnosis_id, "group": group, "status": "pre_done", "is_test": bool(is_test)}
 
 
 # ---------------------------------------------------------------- API-02

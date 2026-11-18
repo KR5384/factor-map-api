@@ -41,17 +41,20 @@ def test_full_flow_saves_everything(client, db):
     body = res.json()
     did = body["diagnosis_id"]
     assert uuid.UUID(did).version == 4
-    assert body == {"diagnosis_id": did, "group": "A", "status": "pre_done"}
+    assert body == {"diagnosis_id": did, "group": "A", "status": "pre_done", "is_test": False}
 
-    result = diagnose(client, did, q05=5, q06=5, q17=5, q18=4)  # 分類3=100点、分類9=88点
+    # すべて3（＝50点）で、Q5・Q6だけ5。分類5（孤独）=70点、分類6（将来不安）=68点、
+    # 分類4（他者比較）・分類8（理想とのギャップ）=55点。70の80%=56 以上は 5・6 の2つ
+    result = diagnose(client, did, q05=5, q06=5)
     assert [s["category_id"] for s in result["scores"]] == list(range(1, 11))
     assert result["shown"] == [
-        {"rank": 1, "category_id": 3, "score": 100},
-        {"rank": 2, "category_id": 9, "score": 88},
+        {"rank": 1, "category_id": 5, "score": 70},
+        {"rank": 2, "category_id": 6, "score": 68},
     ]
-    assert result["main_category_id"] == 3
-    assert result["result_type_id"] == "T03"
+    assert result["main_category_id"] == 5
+    assert result["result_type_id"] == "T05"
     assert result["low_moyamoya"] is False
+    assert result["links"] == []  # 孤独×将来不安は 0.06 で 0.3 未満
 
     res = client.post(POST, json=post_body(did))
     assert res.status_code == 200
@@ -63,10 +66,10 @@ def test_full_flow_saves_everything(client, db):
     assert (r["pre_frequency"], r["pre_explain"], r["pre_relation"], r["age_group"]) == (2, 2, 1, "30s")
     assert [r[f"pre_cause_{c:02d}"] for c in range(1, 11)] == [0, 0, 1, 0, 0, 0, 0, 0, 1, 0]
     assert (r["pre_cause_none"], r["pre_cause_unknown"]) == (0, 0)
-    assert r["q05"] == 5 and r["q18"] == 4 and r["q01"] == 3
-    assert r["score_03"] == 100 and r["score_09"] == 88 and r["score_01"] == 50
-    assert (r["shown_count"], r["shown_1"], r["shown_2"], r["shown_3"]) == (2, 3, 9, None)
-    assert (r["main_category_id"], r["result_type_id"], r["low_moyamoya"]) == (3, "T03", 0)
+    assert r["q05"] == 5 and r["q06"] == 5 and r["q01"] == 3
+    assert (r["score_05"], r["score_06"], r["score_04"], r["score_08"], r["score_01"]) == (70, 68, 55, 55, 50)
+    assert (r["shown_count"], r["shown_1"], r["shown_2"], r["shown_3"]) == (2, 5, 6, None)
+    assert (r["main_category_id"], r["result_type_id"], r["low_moyamoya"]) == (5, "T05", 0)
     assert r["scoring_version"] == result["scoring_version"]
     assert (r["post_explain"], r["post_relation"], r["post_fit"], r["post_discovery"]) == (4, 4, 5, 3)
     assert r["post_comment"] == "情報の多さと考えすぎが関係していると分かった"
@@ -77,7 +80,28 @@ def test_full_flow_saves_everything(client, db):
 # ---------------------------------------------------------------- API-01
 def test_pre_test_mode_header_sets_is_test(client, db):
     res = client.post(PRE, json=pre_body(), headers={"X-Test-Mode": "1"})
+    assert res.json()["is_test"] is True
     assert row(db, res.json()["diagnosis_id"])["is_test"] == 1
+
+
+@pytest.mark.parametrize("value", ["true", "TRUE", "1"])
+def test_force_test_mode_marks_everything_as_test(client, db, monkeypatch, value):
+    monkeypatch.setenv("FORCE_TEST_MODE", value)
+    res = client.post(PRE, json=pre_body())  # ヘッダーなし
+    assert res.json()["is_test"] is True
+    assert row(db, res.json()["diagnosis_id"])["is_test"] == 1
+
+
+def test_force_test_mode_defaults_to_true_when_unset(client, db, monkeypatch):
+    monkeypatch.delenv("FORCE_TEST_MODE")
+    res = client.post(PRE, json=pre_body())
+    assert row(db, res.json()["diagnosis_id"])["is_test"] == 1
+
+
+def test_production_mode_without_header_is_not_test(client, db):
+    res = client.post(PRE, json=pre_body())  # FORCE_TEST_MODE=false（conftest）
+    assert res.json()["is_test"] is False
+    assert row(db, res.json()["diagnosis_id"])["is_test"] == 0
 
 
 @pytest.mark.parametrize("causes, none, unknown", [([98], 1, 0), ([99], 0, 1)])

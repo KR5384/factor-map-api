@@ -5,6 +5,13 @@ from app.db import SQLiteDatabase, get_db
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def settings_env(monkeypatch):
+    """テストの既定：本番モード（FORCE_TEST_MODE=false）、B群なし。テストごとに上書きできる。"""
+    monkeypatch.setenv("FORCE_TEST_MODE", "false")
+    monkeypatch.delenv("ENABLE_GROUP_B", raising=False)
+
+
 @pytest.fixture
 def db():
     """テストごとに空の SQLite（メモリ上）を用意し、db/schema.sql でテーブルを作る。"""

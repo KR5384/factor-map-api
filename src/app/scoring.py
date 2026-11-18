@@ -1,20 +1,58 @@
 """採点ロジック（API仕様書 API-02 の処理 4〜6）。AI は使わない。
 
-【要確認：診断チーム】重み WEIGHTS は仮。診断チームの重みの表（20問×10分類）が届いたら差し替え、
-SCORING_VERSION を上げる。いまは「分類c に Q(2c-1) と Q(2c) が重み1.0で効く」としている。
+重みは factor-map-web の public/questions.json（version 2、2026-11-17）と同じ。
+重みを直すときは questions.json と両方を直し、SCORING_VERSION を上げる。
 """
 
 import math
 from dataclasses import dataclass, field
 from itertools import combinations
 
-SCORING_VERSION = "provisional-2026-11-18"
+SCORING_VERSION = "2026-11-17-v2"
 CATEGORY_IDS = list(range(1, 11))
 QUESTION_KEYS = [f"q{i:02d}" for i in range(1, 21)]
 
+# questions.json の要因ID → 分類ID（DB項目一覧.xlsx の「分類ID」シートと同じ順）
+FACTOR_IDS = {
+    "time_margin": 1,          # 時間・余白不足
+    "recovery": 2,             # 回復不足
+    "info_overload": 3,        # 情報過多・認知負荷
+    "comparison": 4,           # 他者比較・自己評価の揺らぎ
+    "loneliness": 5,           # 孤独・つながり不足
+    "future_uncertainty": 6,   # 将来の不確実性・不安
+    "control": 7,              # コントロール感の低下
+    "ideal_gap": 8,            # 理想と現実のギャップ
+    "rumination": 9,           # 反すう・考え続ける状態
+    "indecision": 10,          # 決められない・行動できない
+}
+
+# questions.json の weights をそのまま写したもの
+_WEIGHTS_BY_FACTOR: dict[str, dict[str, float]] = {
+    "q01": {"time_margin": 0.8, "recovery": 0.2},
+    "q02": {"recovery": 0.8, "time_margin": 0.2},
+    "q03": {"info_overload": 0.8, "rumination": 0.2},
+    "q04": {"comparison": 0.8, "loneliness": 0.2},
+    "q05": {"loneliness": 0.8, "comparison": 0.2},
+    "q06": {"future_uncertainty": 0.8, "ideal_gap": 0.2},
+    "q07": {"control": 0.8, "time_margin": 0.2},
+    "q08": {"ideal_gap": 0.8, "control": 0.2},
+    "q09": {"rumination": 0.8, "info_overload": 0.2},
+    "q10": {"indecision": 0.8, "future_uncertainty": 0.2},
+    "q11": {"info_overload": 0.4, "indecision": 0.3, "time_margin": 0.2, "recovery": 0.1},
+    "q12": {"rumination": 0.4, "future_uncertainty": 0.3, "loneliness": 0.2, "ideal_gap": 0.1},
+    "q13": {"time_margin": 0.4, "control": 0.3, "info_overload": 0.2, "indecision": 0.1},
+    "q14": {"loneliness": 0.4, "comparison": 0.3, "ideal_gap": 0.2, "rumination": 0.1},
+    "q15": {"comparison": 0.4, "ideal_gap": 0.3, "control": 0.2, "loneliness": 0.1},
+    "q16": {"future_uncertainty": 0.4, "control": 0.3, "indecision": 0.2, "comparison": 0.1},
+    "q17": {"control": 0.4, "loneliness": 0.3, "comparison": 0.2, "time_margin": 0.1},
+    "q18": {"ideal_gap": 0.4, "indecision": 0.3, "future_uncertainty": 0.2, "info_overload": 0.1},
+    "q19": {"recovery": 0.4, "time_margin": 0.3, "rumination": 0.2, "control": 0.1},
+    "q20": {"indecision": 0.4, "future_uncertainty": 0.3, "rumination": 0.2, "ideal_gap": 0.1},
+}
+
 # 設問 → {分類ID: 重み}
 WEIGHTS: dict[str, dict[int, float]] = {
-    f"q{q:02d}": {(q + 1) // 2: 1.0} for q in range(1, 21)
+    q: {FACTOR_IDS[f]: w for f, w in ws.items()} for q, ws in _WEIGHTS_BY_FACTOR.items()
 }
 
 # 表示ルール【要確認：診断チーム】
