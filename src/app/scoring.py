@@ -8,7 +8,7 @@ import math
 from dataclasses import dataclass, field
 from itertools import combinations
 
-SCORING_VERSION = "2026-11-17-v2"
+SCORING_VERSION = "2026-11-20-v2"  # 日付＝表示ルールを変えた日、v2＝questions.json の version
 CATEGORY_IDS = list(range(1, 11))
 QUESTION_KEYS = [f"q{i:02d}" for i in range(1, 21)]
 
@@ -55,10 +55,11 @@ WEIGHTS: dict[str, dict[int, float]] = {
     q: {FACTOR_IDS[f]: w for f, w in ws.items()} for q, ws in _WEIGHTS_BY_FACTOR.items()
 }
 
-# 表示ルール【要確認：診断チーム】
-SHOW_RATIO = 0.8      # 1位の何%以上を表示するか
-SHOW_MIN_SCORE = 50   # 表示する最低点
-SHOW_MAX = 4          # 最大何分類表示するか
+# 表示ルール（2026-11-20 決定：1位の85%以上かつ50点以上、最大3つ）
+SHOW_RATIO_PERCENT = 85  # 1位の何%以上を表示するか（小数の誤差を避けるため整数で比べる）
+SHOW_MIN_SCORE = 50      # 表示する最低点
+SHOW_MAX = 3             # 最大何分類表示するか
+DB_SHOWN_COLUMNS = 4     # DB の shown_1〜shown_4（shown_4 は今は使わない。最大4つだった頃の名残）
 LINK_MIN_STRENGTH = 0.3
 
 
@@ -83,14 +84,17 @@ class Result:
 
     @property
     def result_type_id(self) -> str | None:
-        # 当面は「T + 1位の分類ID2桁」。複合タイプが決まったら判定ルールを足す
-        return f"T{self.main_category_id:02d}" if self.shown else None
+        """表示した分類のIDを小さい順に2桁でつないだもの（例 "05"、"04-05"、"03-05-09"）。
+        20_タイプ決め/moyamoya_175types.csv の「タイプID」と同じ。順位は区別しない。"""
+        if not self.shown:
+            return None
+        return "-".join(f"{c:02d}" for c in sorted(c for c, _ in self.shown))
 
     def to_columns(self) -> dict:
         cols = {"scoring_version": self.scoring_version}
         cols |= {f"score_{c:02d}": self.scores[c] for c in CATEGORY_IDS}
         cols["shown_count"] = len(self.shown)
-        for i in range(SHOW_MAX):
+        for i in range(DB_SHOWN_COLUMNS):
             cols[f"shown_{i + 1}"] = self.shown[i][0] if i < len(self.shown) else None
         cols |= {
             "main_category_id": self.main_category_id,
@@ -128,7 +132,7 @@ def pick_shown(scores: dict[int, int]) -> list[tuple[int, int]]:
     top = ranked[0][1]
     if top < SHOW_MIN_SCORE:
         return []
-    return [(c, s) for c, s in ranked if s >= top * SHOW_RATIO and s >= SHOW_MIN_SCORE][:SHOW_MAX]
+    return [(c, s) for c, s in ranked if s * 100 >= top * SHOW_RATIO_PERCENT and s >= SHOW_MIN_SCORE][:SHOW_MAX]
 
 
 def calc_links(shown_ids: list[int], weights=WEIGHTS) -> list[dict]:
@@ -149,7 +153,7 @@ def score(answers: dict[str, int], weights=WEIGHTS) -> Result:
 
 def result_from_row(row: dict, weights=WEIGHTS) -> Result:
     """DB に保存済みの結果からレスポンスを作り直す（再送信されたとき用）。"""
-    shown_ids = [row[f"shown_{i}"] for i in range(1, SHOW_MAX + 1) if row[f"shown_{i}"] is not None]
+    shown_ids = [row[f"shown_{i}"] for i in range(1, DB_SHOWN_COLUMNS + 1) if row[f"shown_{i}"] is not None]
     scores = {c: row[f"score_{c:02d}"] for c in CATEGORY_IDS}
     return Result(
         scores=scores,

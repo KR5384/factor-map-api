@@ -44,7 +44,7 @@ def test_full_flow_saves_everything(client, db):
     assert body == {"diagnosis_id": did, "group": "A", "status": "pre_done", "is_test": False}
 
     # すべて3（＝50点）で、Q5・Q6だけ5。分類5（孤独）=70点、分類6（将来不安）=68点、
-    # 分類4（他者比較）・分類8（理想とのギャップ）=55点。70の80%=56 以上は 5・6 の2つ
+    # 分類4（他者比較）・分類8（理想とのギャップ）=55点。70の85%=59.5 以上は 5・6 の2つ
     result = diagnose(client, did, q05=5, q06=5)
     assert [s["category_id"] for s in result["scores"]] == list(range(1, 11))
     assert result["shown"] == [
@@ -52,7 +52,7 @@ def test_full_flow_saves_everything(client, db):
         {"rank": 2, "category_id": 6, "score": 68},
     ]
     assert result["main_category_id"] == 5
-    assert result["result_type_id"] == "T05"
+    assert result["result_type_id"] == "05-06"
     assert result["low_moyamoya"] is False
     assert result["links"] == []  # 孤独×将来不安は 0.06 で 0.3 未満
 
@@ -69,7 +69,7 @@ def test_full_flow_saves_everything(client, db):
     assert r["q05"] == 5 and r["q06"] == 5 and r["q01"] == 3
     assert (r["score_05"], r["score_06"], r["score_04"], r["score_08"], r["score_01"]) == (70, 68, 55, 55, 50)
     assert (r["shown_count"], r["shown_1"], r["shown_2"], r["shown_3"]) == (2, 5, 6, None)
-    assert (r["main_category_id"], r["result_type_id"], r["low_moyamoya"]) == (5, "T05", 0)
+    assert (r["main_category_id"], r["result_type_id"], r["low_moyamoya"]) == (5, "05-06", 0)
     assert r["scoring_version"] == result["scoring_version"]
     assert (r["post_explain"], r["post_relation"], r["post_fit"], r["post_discovery"]) == (4, 4, 5, 3)
     assert r["post_comment"] == "情報の多さと考えすぎが関係していると分かった"

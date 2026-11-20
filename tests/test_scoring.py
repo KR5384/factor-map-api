@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from app.scoring import calc_links, calc_scores, pick_shown, score
+from app.scoring import Result, calc_links, calc_scores, pick_shown, score
 from app.settings import get_setting, is_enabled
 
 
@@ -18,11 +18,20 @@ def test_all_lowest_is_low_moyamoya():
     assert r.low_moyamoya and r.shown == [] and r.main_category_id is None and r.result_type_id is None
 
 
-def test_all_highest_shows_four_by_id_order():
+def test_all_highest_shows_three_by_id_order():
     r = score(answers(default=5))
     assert set(r.scores.values()) == {100}
-    assert [c for c, _ in r.shown] == [1, 2, 3, 4]  # 同点は分類IDの小さい順、最大4つ
-    assert r.main_category_id == 1 and r.result_type_id == "T01"
+    assert [c for c, _ in r.shown] == [1, 2, 3]  # 同点は分類IDの小さい順、最大3つ
+    assert r.main_category_id == 1 and r.result_type_id == "01-02-03"
+    assert r.to_columns()["shown_4"] is None
+
+
+def test_result_type_id_is_sorted_category_ids():
+    # 順位ではなく分類IDの小さい順につなぐ（175types.csv のタイプIDと同じ）
+    one = {c: 0 for c in range(1, 11)} | {5: 80}
+    assert Result(scores=one, shown=[(5, 80)]).result_type_id == "05"
+    assert Result(scores=one, shown=[(9, 90), (3, 80)]).result_type_id == "03-09"
+    assert Result(scores=one, shown=[(10, 90), (4, 85), (7, 80)]).result_type_id == "04-07-10"
 
 
 def test_scores_by_hand():
@@ -41,14 +50,21 @@ def test_round_half_up():
     assert calc_scores(answers(default=1, q01=4), simple)[1] == 38  # 37.5 → 38
 
 
-def test_show_ratio_80_percent():
-    scores = {c: 0 for c in range(1, 11)} | {1: 100, 2: 80, 3: 79}
-    assert pick_shown(scores) == [(1, 100), (2, 80)]
+def test_show_ratio_85_percent():
+    scores = {c: 0 for c in range(1, 11)} | {1: 100, 2: 85, 3: 84}
+    assert pick_shown(scores) == [(1, 100), (2, 85)]
+    # 60 の85%＝51 ちょうどは表示する（小数の誤差で外れない）
+    assert pick_shown({c: 0 for c in range(1, 11)} | {1: 60, 2: 51, 3: 50}) == [(1, 60), (2, 51)]
+
+
+def test_show_max_3():
+    scores = {c: 0 for c in range(1, 11)} | {1: 90, 2: 89, 3: 88, 4: 87}
+    assert [c for c, _ in pick_shown(scores)] == [1, 2, 3]
 
 
 def test_show_min_50():
     scores = {c: 0 for c in range(1, 11)} | {1: 60, 2: 49}
-    assert pick_shown(scores) == [(1, 60)]  # 49 は 1位の80%以上だが50点未満
+    assert pick_shown(scores) == [(1, 60)]  # 49 は 1位の85%（51）未満で、しかも50点未満
     assert pick_shown({c: 49 for c in range(1, 11)}) == []
     assert pick_shown({c: 0 for c in range(1, 11)} | {5: 50}) == [(5, 50)]
 

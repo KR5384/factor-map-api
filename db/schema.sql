@@ -66,9 +66,9 @@ CREATE TABLE IF NOT EXISTS diagnoses (
   shown_1          INTEGER CHECK (shown_1 BETWEEN 1 AND 10),
   shown_2          INTEGER CHECK (shown_2 BETWEEN 1 AND 10),
   shown_3          INTEGER CHECK (shown_3 BETWEEN 1 AND 10),
-  shown_4          INTEGER CHECK (shown_4 BETWEEN 1 AND 10),
+  shown_4          INTEGER CHECK (shown_4 BETWEEN 1 AND 10),  -- 今は使わない（最大3つに決定 2026-11-20）
   main_category_id INTEGER CHECK (main_category_id BETWEEN 1 AND 10),
-  result_type_id   TEXT,
+  result_type_id   TEXT,                 -- 表示した分類IDを小さい順につないだもの（例 05 / 04-05 / 03-05-09）
   low_moyamoya     INTEGER CHECK (low_moyamoya IN (0,1)),
   answered_at      TEXT,
 
