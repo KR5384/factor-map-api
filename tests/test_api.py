@@ -47,14 +47,16 @@ def test_full_flow_saves_everything(client, db):
     # 分類4（他者比較）・分類8（理想とのギャップ）=55点。70の85%=59.5 以上は 5・6 の2つ
     result = diagnose(client, did, q05=5, q06=5)
     assert [s["category_id"] for s in result["scores"]] == list(range(1, 11))
-    assert result["shown"] == [
+    assert result["type_categories"] == [
         {"rank": 1, "category_id": 5, "score": 70},
         {"rank": 2, "category_id": 6, "score": 68},
     ]
+    # 円は点数の高い順に5つ（同点は分類IDの小さい順）
+    assert [(c["category_id"], c["score"]) for c in result["circles"]] == [(5, 70), (6, 68), (4, 55), (8, 55), (1, 50)]
     assert result["main_category_id"] == 5
     assert result["result_type_id"] == "05-06"
     assert result["low_moyamoya"] is False
-    assert result["links"] == []  # 孤独×将来不安は 0.06 で 0.3 未満
+    assert result["links"] == [{"from": 5, "to": 6}]  # タイプの分類同士を線でつなぐ
 
     res = client.post(POST, json=post_body(did))
     assert res.status_code == 200
@@ -229,9 +231,25 @@ def test_fa_low_moyamoya(client, db):
     did = start(client)
     result = diagnose(client, did, default=1)
     assert result["low_moyamoya"] is True
-    assert result["shown"] == [] and result["main_category_id"] is None and result["result_type_id"] is None
+    # 全問「まったくない」(全部0点) はタイプも円も無し
+    assert result["type_categories"] == [] and result["circles"] == [] and result["links"] == []
+    assert result["main_category_id"] is None and result["result_type_id"] is None
     r = row(db, did)
     assert (r["low_moyamoya"], r["shown_count"], r["shown_1"], r["main_category_id"]) == (1, 0, None, None)
+
+
+def test_fa_low_moyamoya_gets_closest_type(client, db):
+    # 全部「まったくない」で Q4（他者比較）だけ「よくある」。1位でも50点未満
+    did = start(client)
+    result = diagnose(client, did, default=1, q04=4)
+    assert result["low_moyamoya"] is True
+    assert [c["category_id"] for c in result["type_categories"]] == [4]
+    assert result["result_type_id"] == "04" and result["main_category_id"] == 4 and result["links"] == []
+    assert result["circles"][0]["category_id"] == 4
+    r = row(db, did)
+    assert (r["low_moyamoya"], r["shown_count"], r["shown_1"], r["result_type_id"]) == (1, 1, 4, "04")
+    # 再送信しても同じ結果（DB から作り直しても円・線が同じになる）
+    assert diagnose(client, did, default=1, q04=4) == result
 
 
 def test_fa_resend_after_completed_still_returns_result(client):

@@ -5,7 +5,7 @@
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from itertools import combinations
 
 SCORING_VERSION = "2026-11-20-v2"  # 日付＝表示ルールを変えた日、v2＝questions.json の version
@@ -55,47 +55,64 @@ WEIGHTS: dict[str, dict[int, float]] = {
     q: {FACTOR_IDS[f]: w for f, w in ws.items()} for q, ws in _WEIGHTS_BY_FACTOR.items()
 }
 
-# 表示ルール（2026-11-20 決定：1位の85%以上かつ50点以上、最大3つ）
-SHOW_RATIO_PERCENT = 85  # 1位の何%以上を表示するか（小数の誤差を避けるため整数で比べる）
-SHOW_MIN_SCORE = 50      # 表示する最低点
-SHOW_MAX = 3             # 最大何分類表示するか
-DB_SHOWN_COLUMNS = 4     # DB の shown_1〜shown_4（shown_4 は今は使わない。最大4つだった頃の名残）
-LINK_MIN_STRENGTH = 0.3
+# 表示ルール（2026-11-20 決定）
+# - タイプ：1位の85%以上かつ50点以上の分類、最大3つ。1位が50点未満（もやもやが少ない人）は1位だけ
+# - 円：点数の高い順に最大5つ。20点未満は出さない。ただしタイプの分類は必ず出す
+# - 線：タイプの分類同士を結ぶ
+TYPE_RATIO_PERCENT = 85  # 1位の何%以上をタイプに入れるか（小数の誤差を避けるため整数で比べる）
+TYPE_MIN_SCORE = 50      # タイプに入れる最低点。1位がこれ未満なら low_moyamoya
+TYPE_MAX = 3             # タイプにする分類の最大数（175types.csv は3つまで）
+CIRCLE_MAX = 5           # 円の最大数
+CIRCLE_MIN_SCORE = 20    # 円に出す最低点（タイプの分類は例外）【仮】
+DB_SHOWN_COLUMNS = 4     # DB の shown_1〜shown_4 にタイプの分類を入れる（shown_4 は今は使わない）
 
 
 def round_half_up(x: float) -> int:
     return math.floor(x + 0.5)
 
 
+def rank(scores: dict[int, int]) -> list[tuple[int, int]]:
+    """点数の高い順（同点は分類IDの小さい順）。"""
+    return sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
 @dataclass
 class Result:
     scores: dict[int, int]
-    shown: list[tuple[int, int]]  # (分類ID, 点数) を順位順に
-    links: list[dict] = field(default_factory=list)
+    type_categories: list[tuple[int, int]]  # タイプの分類 (分類ID, 点数) を順位順に
     scoring_version: str = SCORING_VERSION
 
     @property
     def low_moyamoya(self) -> bool:
-        return not self.shown
+        return rank(self.scores)[0][1] < TYPE_MIN_SCORE
 
     @property
     def main_category_id(self) -> int | None:
-        return self.shown[0][0] if self.shown else None
+        return self.type_categories[0][0] if self.type_categories else None
 
     @property
     def result_type_id(self) -> str | None:
-        """表示した分類のIDを小さい順に2桁でつないだもの（例 "05"、"04-05"、"03-05-09"）。
+        """タイプの分類IDを小さい順に2桁でつないだもの（例 "05"、"04-05"、"03-05-09"）。
         20_タイプ決め/moyamoya_175types.csv の「タイプID」と同じ。順位は区別しない。"""
-        if not self.shown:
+        if not self.type_categories:
             return None
-        return "-".join(f"{c:02d}" for c in sorted(c for c, _ in self.shown))
+        return "-".join(f"{c:02d}" for c in sorted(c for c, _ in self.type_categories))
+
+    @property
+    def circles(self) -> list[tuple[int, int]]:
+        type_ids = {c for c, _ in self.type_categories}
+        return [(c, s) for c, s in rank(self.scores) if s >= CIRCLE_MIN_SCORE or c in type_ids][:CIRCLE_MAX]
+
+    @property
+    def links(self) -> list[dict]:
+        return [{"from": a, "to": b} for (a, _), (b, _) in combinations(self.type_categories, 2)]
 
     def to_columns(self) -> dict:
         cols = {"scoring_version": self.scoring_version}
         cols |= {f"score_{c:02d}": self.scores[c] for c in CATEGORY_IDS}
-        cols["shown_count"] = len(self.shown)
+        cols["shown_count"] = len(self.type_categories)
         for i in range(DB_SHOWN_COLUMNS):
-            cols[f"shown_{i + 1}"] = self.shown[i][0] if i < len(self.shown) else None
+            cols[f"shown_{i + 1}"] = self.type_categories[i][0] if i < len(self.type_categories) else None
         cols |= {
             "main_category_id": self.main_category_id,
             "result_type_id": self.result_type_id,
@@ -104,11 +121,15 @@ class Result:
         return cols
 
     def to_response(self, diagnosis_id: str) -> dict:
+        def ranked(items):
+            return [{"rank": i + 1, "category_id": c, "score": s} for i, (c, s) in enumerate(items)]
+
         return {
             "diagnosis_id": diagnosis_id,
             "scoring_version": self.scoring_version,
             "scores": [{"category_id": c, "score": self.scores[c]} for c in CATEGORY_IDS],
-            "shown": [{"rank": i + 1, "category_id": c, "score": s} for i, (c, s) in enumerate(self.shown)],
+            "circles": ranked(self.circles),
+            "type_categories": ranked(self.type_categories),
             "main_category_id": self.main_category_id,
             "result_type_id": self.result_type_id,
             "low_moyamoya": self.low_moyamoya,
@@ -127,37 +148,27 @@ def calc_scores(answers: dict[str, int], weights=WEIGHTS) -> dict[int, int]:
     return {c: round_half_up(got[c] / full[c] * 100) if full[c] else 0 for c in CATEGORY_IDS}
 
 
-def pick_shown(scores: dict[int, int]) -> list[tuple[int, int]]:
-    ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
+def pick_type(scores: dict[int, int]) -> list[tuple[int, int]]:
+    ranked = rank(scores)
     top = ranked[0][1]
-    if top < SHOW_MIN_SCORE:
-        return []
-    return [(c, s) for c, s in ranked if s * 100 >= top * SHOW_RATIO_PERCENT and s >= SHOW_MIN_SCORE][:SHOW_MAX]
-
-
-def calc_links(shown_ids: list[int], weights=WEIGHTS) -> list[dict]:
-    """表示した分類同士のつながり＝同じ設問の中での重みの積の合計（設計上の想定）。"""
-    links = []
-    for a, b in combinations(shown_ids, 2):
-        strength = round(sum(w.get(a, 0) * w.get(b, 0) for w in weights.values()), 2)
-        if strength >= LINK_MIN_STRENGTH:
-            links.append({"from": a, "to": b, "strength": strength})
-    return links
+    if top == 0:
+        return []  # 全部0点（全問「まったくない」）はタイプを出さない
+    if top < TYPE_MIN_SCORE:
+        return ranked[:1]  # もやもやが少ない人も、いちばん近いタイプを1つ出す
+    return [(c, s) for c, s in ranked if s * 100 >= top * TYPE_RATIO_PERCENT and s >= TYPE_MIN_SCORE][:TYPE_MAX]
 
 
 def score(answers: dict[str, int], weights=WEIGHTS) -> Result:
     scores = calc_scores(answers, weights)
-    shown = pick_shown(scores)
-    return Result(scores=scores, shown=shown, links=calc_links([c for c, _ in shown], weights))
+    return Result(scores=scores, type_categories=pick_type(scores))
 
 
-def result_from_row(row: dict, weights=WEIGHTS) -> Result:
-    """DB に保存済みの結果からレスポンスを作り直す（再送信されたとき用）。"""
-    shown_ids = [row[f"shown_{i}"] for i in range(1, DB_SHOWN_COLUMNS + 1) if row[f"shown_{i}"] is not None]
+def result_from_row(row: dict) -> Result:
+    """DB に保存済みの結果からレスポンスを作り直す（再送信されたとき用）。円と線は点数とタイプから決まる。"""
+    type_ids = [row[f"shown_{i}"] for i in range(1, DB_SHOWN_COLUMNS + 1) if row[f"shown_{i}"] is not None]
     scores = {c: row[f"score_{c:02d}"] for c in CATEGORY_IDS}
     return Result(
         scores=scores,
-        shown=[(c, scores[c]) for c in shown_ids],
-        links=calc_links(shown_ids, weights),
+        type_categories=[(c, scores[c]) for c in type_ids],
         scoring_version=row["scoring_version"],
     )
